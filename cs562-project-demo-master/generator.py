@@ -1,5 +1,9 @@
 import subprocess
-
+import os
+import psycopg2
+import psycopg2.extras
+import tabulate
+from dotenv import load_dotenv
 
 def main():
     """
@@ -7,7 +11,116 @@ def main():
     needed to run the query. That generated code should be saved to a 
     file (e.g. _generated.py) and then run.
     """
+    class mf_struct:
+        def __init__(self, data):
+            self.s = [] # projected values
+            self.n = 0 # number of grouping variables
+            self.v = [] # grouping attributes
+            self.F = [] # list of aggregates
+            self.sigma = [] # grouping variables predicates 
+            self.G = None # having clause
 
+        
+    def schema_info():
+        query = F"""
+        SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'public' and TABLE_NAME = 'sales'
+        """
+        load_dotenv()
+
+        user = os.getenv('USER')
+        password = os.getenv('PASSWORD')
+        dbname = os.getenv('DBNAME')
+
+        conn = psycopg2.connect("dbname="+dbname+" user="+user+" password="+password,
+                                cursor_factory=psycopg2.extras.DictCursor)
+        
+        cur = conn.cursor()
+        cur.execute(query)
+        data = cur.fetchall()
+        conn.close()
+
+        return data        
+
+    def process_info(query, schemaData):
+        V = [] # list of grouping attributes
+        F_VECT = [] # list of aggregate functions
+        
+        # potential aggregates
+        aggregates = ["sum", "count", "avg", "min", "max", "variance", "median", "mode", "first_value", "last_value"]
+        
+        # potential group vars
+        groupvars = ["cust", "prod", "day", "month", "year", "state", "quant", "date"]
+              
+        querySplit = query.split('\n')
+        for line in querySplit:
+            line = line.lower() # make everything lowercase
+
+        select = ""
+        From = ""
+        where = ""
+        group_by = ""
+        such_that = ""
+        having = ""
+
+        if len(querySplit) > 0:
+            select = querySplit[0][7:]
+        if len(querySplit) > 1:
+            From = querySplit[1][5:]
+        if len(querySplit) > 2:
+            if "where" in querySplit[2].lower():
+                where = querySplit[2][5:]
+            elif "group" in querySplit[2].lower():
+                group_by = querySplit[2][9:]
+        if len(querySplit) > 3:
+            if "group" in querySplit[3].lower():
+                group_by = querySplit[3][9:]
+            elif "such that" in querySplit[3].lower():
+                such_that = querySplit[3][10:]
+            elif "having" in querySplit[3].lower():
+                having = querySplit[3][7:]
+        if len(querySplit) > 4:
+            if "such that" in querySplit[4].lower():
+                such_that = querySplit[4][10:]
+            elif "having" in querySplit[4].lower():
+                having = querySplit[4][7:]
+
+        print("SELECT:", select)
+        print("FROM:", From)
+        print("WHERE:", where)
+        print("GROUP BY:", group_by)
+        print("SUCH THAT:", such_that)
+        print("HAVING:", having)
+
+        #select = select.split(",")
+        #print(select)
+
+
+        return V, F_VECT
+    
+    # PUT ALGORITHM HERE:
+
+    schemaData = schema_info()
+
+    query = """SELECT prod, sum(X.quant), sum(Y.quant), sum(Z.quant)
+FROM sales
+WHERE year=2017
+GROUP BY prod : X, Y, Z
+SUCH THAT X.month = 1, Y.month = 2, Z.month = 3"""
+    """ 
+    [['cust', 'character varying', 20], 
+    ['prod', 'character varying', 20], 
+    ['day', 'integer', None], 
+    ['month', 'integer', None], 
+    ['year', 'integer', None], 
+    ['state', 'character', 2], 
+    ['quant', 'integer', None], 
+    ['date', 'date', None]]
+    """
+    
+    V, F_VECT = process_info(query, schemaData)
+    
     body = """
     for row in cur:
         if row['quant'] > 10:
@@ -54,6 +167,8 @@ if "__main__" == __name__:
     open("_generated.py", "w").write(tmp)
     # Execute the generated code
     subprocess.run(["python", "_generated.py"])
+
+    #print(schemaData)
 
 
 if "__main__" == __name__:
