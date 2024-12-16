@@ -4,6 +4,9 @@ import psycopg2
 import psycopg2.extras
 import tabulate
 from dotenv import load_dotenv
+import pandas as pd
+import time
+
 
 def main():
     """
@@ -107,9 +110,12 @@ def main():
 
         mf_struct.s = select # add projected vals to struct.s
 
-        group_by = group_by.split(":")
+        # split projected values        
+        select = select.split(",")
+        #print(select)
+        
+        group_by = group_by.split(",")
         #print(group_by)
-
         
         such_that = such_that.split(",")
         for predicate in such_that:
@@ -117,10 +123,6 @@ def main():
         
         if (having):
             mf_struct.G = having # replace struct.G with having clause if it exists
-
-        # split projected values        
-        select = select.split(",")
-        #print(select)
 
         # from column name, data_type and max_char_length in schema
         for col_name, data_type, max_len in schemaData:
@@ -130,17 +132,19 @@ def main():
                 sel = sel.strip()
 
                 # Check if sel is possible aggregate function
-                if '(' in sel and ')' in sel:
+                if '(' in sel and ')' in sel:                    
                     left = sel.index('(')
                     right = sel.index(')')
                     aggregate = sel[:left].strip() # aggregate function name
                     arg = sel[left + 1:right].strip() # argument name
-
+                    
                     if col_name.lower() in arg and aggregate.lower() in aggregates:
                         mf_struct.F.append(sel) # append aggregates to struct.F
                         F_VECT.append({
                             "agg": sel,
-                            "type": data_type
+                            "type": data_type,
+                            "arg": arg,
+                            "func": aggregate
                         })
                         continue
             for group in group_by:
@@ -152,8 +156,8 @@ def main():
                         "type": data_type,
                         "size": max_len
                     })
-    
-        mf_struct.n = len(V) # add number of gvs
+                
+        mf_struct.n = len(F_VECT) # add number of gvs
         
         print("struct {")
         # Print out the grouping attributes (V)
@@ -165,7 +169,6 @@ def main():
         print("} mf_struct[500];")
 
         return V, F_VECT
-    
 
 
     schemaData = schema_info()
@@ -176,14 +179,104 @@ WHERE year=2017
 GROUP BY prod : X, Y, Z
 SUCH THAT X.month = 1, Y.month = 2, Z.month = 3"""
 
-    select, From, where, group_by, such_that, having = read_file("MFQuery1.txt")
-
+    select, From, where, group_by, such_that, having = read_file("simpleQuery.txt")
+    
     V, F_VECT = process_info(select, From, where, group_by, such_that, having, schemaData)
     
+    print('\n Phi Operators of the Query')
+    print("s = ", mf_struct.s)
+    print("n = ", mf_struct.n)
+    print("v = ", mf_struct.v)
+    print("F = ", mf_struct.F)
+    print("sigma = ", mf_struct.sigma)
+    print("G = ", mf_struct.G)
+
+
+    def H_table():
+        load_dotenv()
+        user = os.getenv('USER')
+        password = os.getenv('PASSWORD')
+        dbname = os.getenv('DBNAME')
+
+        conn = psycopg2.connect("dbname="+dbname+" user="+user+" password="+password,
+                                cursor_factory=psycopg2.extras.DictCursor)
+        cur = conn.cursor()
+
+        query = f"SELECT * FROM sales"
+        if len(where) != 0:
+            query += f" WHERE {where}"
+            
+        cur.execute(query)
+
+        # initalize H table with headers
+        H = pd.DataFrame(None, columns=mf_struct.v)
+        for col in mf_struct.F:
+            H[col] = None
+
+        col_name = ["cust", "prod", "day", "month", "year", "state", "quant", "date"]
+        unique = [] # store unique combos based on group by vars
+        agg_values = {f['agg']: {} for f in F_VECT} 
+        # agg_values = {f['agg'] : {} } will hold dictionary of group by values with their corresponding data based on other aggregates
+        # example: {'avg(quant)' : {[Dan, Butter] : [numbers] }, 'max(quant)' : {[Dan , Butter] : [numbers] } }
+        
+        # first scan populates gvs columns
+        for row in cur:
+            # only include unique rows based on group vars
+            row_combo = tuple(row[col_name.index(gv)] for gv in mf_struct.v) # find index of group var based on col_name index to get value in data table
+            # if not in unique then add it (group by function)
+            if row_combo not in unique:
+                unique.append(row_combo)
+            # if there are aggregates, keep track of their values
+            if len(F_VECT) != 0:
+                for f in F_VECT:
+                    if row_combo not in agg_values[f['agg']]:
+                        agg_values[f['agg']][row_combo] = []
+                    agg_values[f['agg']][row_combo].append(row[col_name.index(f['arg'])])
+                
+        # populate H table, grouping by group vars 
+        H = pd.DataFrame(unique, columns=mf_struct.v)
+        for col in mf_struct.F:
+            H[col] = None
+        
+        # filter based on such that conditions
+
+        # if there are aggregates calculate their functions
+        if len(F_VECT) != 0:
+            for f in F_VECT:
+                for row_combo, values in agg_values[f['agg']].items():
+                    if f['func'] == 'avg':
+                        result = sum(values) / len(values)
+                    elif f['func'] == 'sum':
+                        result = sum(values)
+                    elif f['func'] == 'max':
+                        result = max(values)
+                    elif f['func'] == 'min':
+                        result = min(values)
+                    elif f['func'] == 'count':
+                        result = len(values)
+                    else: continue
+
+                    # Match the first group variable
+                    row_index = H.index[H[mf_struct.v[0]] == row_combo[0]]
+                    if len(mf_struct.v) > 1:
+                        # iterate through all group vars and find corresponding row index
+                        for index, gv in enumerate(mf_struct.v):  # Match the rest of the group variables
+                            # select row by index position if it is equal to the group by values
+                            row_index = row_index[H.iloc[row_index][gv] == row_combo[index]]
+                    # assign aggregate value to specific row
+                    H.loc[row_index, f['agg']] = result
+        H = tabulate.tabulate(H,
+            headers="keys", tablefmt="psql")
+        return H
+    
+
+             
+
+
     # PUT ALGORITHM HERE:
     body = """
     for row in cur:
-        if row['quant'] > 10:
+        if row['year'] == 2016:
             _global.append(row)
     """
 
@@ -228,8 +321,8 @@ if "__main__" == __name__:
     # Execute the generated code
     #subprocess.run(["python", "_generated.py"])
 
-    #print(schemaData)
+    print(H_table())
 
-
+    
 if "__main__" == __name__:
     main()

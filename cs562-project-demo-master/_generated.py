@@ -22,7 +22,7 @@ def query():
     _global = []
     
     for row in cur:
-        if row['quant'] > 10:
+        if row['year'] == 2016:
             _global.append(row)
     
     
