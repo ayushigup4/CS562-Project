@@ -21,7 +21,7 @@ def query():
     cur = conn.cursor()
     
     # input SQL query trying to run
-    cur.execute("SELECT * FROM sales WHERE quant > 10")
+    cur.execute("select cust, prod, avg(quant), max(quant) from sales where year=2016 group by cust, prod")
     
     return tabulate.tabulate(cur.fetchall(),
                              headers="keys", tablefmt="psql")
