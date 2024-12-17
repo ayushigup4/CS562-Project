@@ -1,0 +1,5 @@
+SELECT prod, month, avg(X.quant), avg(Y.quant)
+FROM Sales
+WHERE year=2017
+GROUP BY prod, month: X , Y
+SUCH THAT X.prod=prod AND X.month<month AND Y.prod=prod AND Y.month<month
