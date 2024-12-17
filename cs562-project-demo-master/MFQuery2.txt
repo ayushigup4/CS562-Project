@@ -1,5 +1,5 @@
-SELECT state, avg(X.quant), max(Y.quant), min(Z.quant)
+SELECT prod, cust, avg(A.quant), max(B.quant), min(C.quant), count(D.quant)
 FROM sales
 WHERE year=2019
-GROUP BY state: X, Y, Z
-SUCH THAT X.state = CT, Y.state = NJ, Z.state = NY
+GROUP BY prod, cust: A, B, C, D
+SUCH THAT A.state = CT, B.state = NJ, C.state = NY, D.state = PA

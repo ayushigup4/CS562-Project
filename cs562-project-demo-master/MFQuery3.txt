@@ -1,0 +1,4 @@
+SELECT cust, state, year, count(X.quant), count(Y.quant)
+FROM sales
+GROUP BY cust, state, year : X, Y
+SUCH THAT X.year=2020, Y.date=2020-12-25
