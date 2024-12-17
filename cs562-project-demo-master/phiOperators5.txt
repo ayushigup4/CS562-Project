@@ -1,0 +1,6 @@
+s = cust, x_sum_quant, y_sum_quant, z_sum_quant 
+n = 3
+v = cust 
+F = [x_sum_quant, y_sum_quant, z_sum_quant]
+sigma = [x.state =NY and y.state = NJ and z.state = CT]
+G = x_sum_quant > 2 * y_sum_quant or x_avg_quant > z_avg_quant 
