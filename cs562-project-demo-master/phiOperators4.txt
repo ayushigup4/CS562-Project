@@ -7,7 +7,8 @@ HAVING sum(X.quant) < sum(y.quant)
 
 s = prod, x_sum_quant, y_sum_quant, z_avg_quant 
 n = 3
-v = 
-F = 
-sigma = 
-G =
+v = prod
+F = [x_sum_quant, y_sum_quant, z_avg_quant ]
+sigma = X.month = 1, Y.month = 2, Z.month = 3
+G = x_sum_quant < y_sum_quant 
+
