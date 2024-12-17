@@ -1,0 +1,5 @@
+select cust, prod, avg(quant), max(quant)
+from sales
+where year=2016
+group by cust, prod
+having avg(quant) > 500 and max(quant) < 1000

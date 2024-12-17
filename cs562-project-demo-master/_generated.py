@@ -19,7 +19,7 @@ def query():
             self.G = None # having clause
     mf_struct = mf_struct()    
     schemaData = schema_info()
-    select, From, where, group_by, such_that, having = read_file("MFQuery3.txt")
+    select, From, where, group_by, such_that, having = read_file("MFQuery5.txt")
     group_by_vars, V, F_VECT = process_info(select, group_by, such_that, having, mf_struct, schemaData)
 
     
