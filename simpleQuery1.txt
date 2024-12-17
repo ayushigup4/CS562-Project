@@ -1,0 +1,5 @@
+SELECT cust, SUM(quant), MAX(quant)
+FROM sales
+GROUP BY cust, prod
+SUCH THAT state = 'NY'
+HAVING SUM(quant) > 100;

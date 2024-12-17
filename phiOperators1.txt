@@ -1,0 +1,6 @@
+s = prod, sum(X.quant), sum(Y.quant), sum(Z.quant)
+n = 3
+v = prod
+F = [sum(X.quant), sum(Y.quant), sum(Z.quant)]
+sigma = [X.month = 1, Y.month = 2, Z.month = 3]
+G = null

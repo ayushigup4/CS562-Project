@@ -1,0 +1,5 @@
+SELECT state, avg(X.quant), max(Y.quant), min(Z.quant)
+FROM sales
+WHERE year=2019
+GROUP BY state: X, Y, Z
+SUCH THAT X.state = CT, Y.state = NJ, Z.state = NY

@@ -1,0 +1,5 @@
+SELECT prod, sum(X.quant), sum(Y.quant), sum(Z.quant)
+FROM sales
+WHERE year=2017
+GROUP BY prod : X, Y, Z
+SUCH THAT X.month = 1, Y.month = 2, Z.month = 3
