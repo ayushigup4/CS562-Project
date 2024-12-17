@@ -1,7 +1,7 @@
-s = prod, cust avg(A.quant), max(B.quant), max(B.quant), min(C.quant), count(D.quant)
+s = prod, cust, A_avg_quant, B_max_quant, C_min_quant, D_count_quant
 n = 4
 v = prod, cust 
-F = [avg(A.quant), max(B.quant), max(B.quant), min(C.quant), count(D.quant)]
+F = [A_avg_quant, B_max_quant, C_min_quant, D_count_quant]
 sigma = [A.state = CT, B.state = NJ, C.state = NY, D.state = PA]
 G = null
 
