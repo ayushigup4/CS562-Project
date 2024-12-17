@@ -5,7 +5,7 @@ import psycopg2.extras
 import tabulate
 from dotenv import load_dotenv
 import pandas as pd
-import datetime
+import time
 
     
 class mf_struct:
@@ -93,7 +93,7 @@ def process_info(select, group_by, such_that, having, mf_struct, schemaData):
     F_VECT = [] # list of aggregate functions
 
     # potential aggregates
-    aggregates = ["sum", "count", "avg", "min", "max"]
+    aggregates = ["sum", "count", "avg", "min", "max", "variance", "median", "mode", "first_value", "last_value"]
         
     # potential group by attributes
     groupAttrs = ["cust", "prod", "day", "month", "year", "state", "quant", "date"]
@@ -197,35 +197,8 @@ def process_conditions(mf_struct, group_by_vars):
                 })
     return conditions
 
-def preprocess_having_clause(having, H):
-    """
-    Translates HAVING clause into a pandas-compatible query string.
-    """
-    having = having.replace("=", "==").replace("<>", "!=")
-    for col in H.columns:
-        if col in having:
-            having = having.replace(col, f"`{col}`")  
-    return having
 
 
-def process_having(having):
-    """
-    Process the HAVING clause to extract conditions and operators.
-    """
-    conditions = []
-    operators = ['>=', '<=', '>', '<', '==', '!=']
-    
-    if having:
-        for op in operators:
-            if op in having:
-                left, right = having.split(op)
-                conditions.append({
-                    'agg': left.strip(),  # e.g., 'avg(quant)'
-                    'op': op,
-                    'value': float(right.strip())  # ensures comparison is numeric
-                })
-                break
-    return conditions
 
 
 def eval_conditions(row, conditions, f):
@@ -244,27 +217,20 @@ def eval_conditions(row, conditions, f):
     # get the value of the row to perform the condition
     row_value = row[row_index]
 
-    condition = conditions[gv][0]["cond"]
-
-    # make sure if value is a string, date or int to treat it as such
-    # if a string make sure it is being passed as a string literal
-    if isinstance(row_value, str) or isinstance(row_value, datetime.date):
-        row_value = f"'{row_value}'"
-    
-    if isinstance(condition, str) or isinstance(condition, datetime.date):
-        condition = f"'{condition}'"
-
-    #print(f"{row_value} {conditions[gv][0]['op']} {condition}")
-    if eval(f"{row_value} {conditions[gv][0]['op']} {condition}"):
+    #if isinstance(row_value, str) and 
+    #print(f"{row_value} {conditions[gv][0]['op']} {conditions[gv][0]['cond']}")
+    if eval(f"{row_value} {conditions[gv][0]['op']} {conditions[gv][0]['cond']}"):
         return True
     else: return False
 
 
 schemaData = schema_info()
 
-select, From, where, group_by, such_that, having = read_file("MFQuery3.txt")
+select, From, where, group_by, such_that, having = read_file("havingMF.txt")
     
 group_by_vars, V, F_VECT = process_info(select, group_by, such_that, having, mf_struct, schemaData)
+
+conditions = process_conditions(mf_struct, group_by_vars)
 
 """
 print('\n Phi Operators of the Query')
@@ -276,38 +242,35 @@ print("sigma = ", mf_struct.sigma)
 print("G = ", mf_struct.G)
 """
 
-
-def apply_having_filter(H, having_conditions):
+def apply_having_filter(H, having):
     """
-    Filter rows in the H-table based on HAVING conditions using pandas logical operations.
+    Applies the HAVING clause dynamically using pandas query after normalizing column names.
     """
-    filtered_rows = H.copy()
-    for condition in having_conditions:
-        column = condition['agg']  # aggregate column name like 'avg(quant)'
-        operator = condition['op']
-        value = condition['value']
-        
-        # apply the condition using pandas query string or logical comparison
-        if operator == '==':
-            filtered_rows = filtered_rows[filtered_rows[column] == value]
-        elif operator == '!=':
-            filtered_rows = filtered_rows[filtered_rows[column] != value]
-        elif operator == '>':
-            filtered_rows = filtered_rows[filtered_rows[column] > value]
-        elif operator == '>=':
-            filtered_rows = filtered_rows[filtered_rows[column] >= value]
-        elif operator == '<':
-            filtered_rows = filtered_rows[filtered_rows[column] < value]
-        elif operator == '<=':
-            filtered_rows = filtered_rows[filtered_rows[column] <= value]
-        else:
-            print(f"Unknown operator {operator} in HAVING clause.")
-    
-    return filtered_rows
+    if not having:
+        return H  # no HAVING clause, return unchanged
+
+    try:
+        # normalize column names
+        H.columns = [col.replace("(", "_").replace(")", "") for col in H.columns]
+
+        # normalize HAVING clause
+        normalized_having = having.replace("(", "_").replace(")", "").replace("=", "==").replace("<>", "!=")
+
+        # apply HAVING clause
+        H_filtered = H.query(normalized_having)
+
+        return H_filtered.reset_index(drop=True)
+    except Exception as e:
+        print(f"Error applying HAVING clause: {e}")
+        return H
 
 
 
-def H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct): 
+
+def H_table(where, such_that, having, F_VECT, mf_struct): 
+    """
+    Builds the H-table using pandas, applies aggregates, and filters with the HAVING clause.
+    """
     load_dotenv()
     user = os.getenv('USER')
     password = os.getenv('PASSWORD')
@@ -334,6 +297,7 @@ def H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct):
     row_combo = tuple()
     # agg_values = {f['agg'] : {} } will hold dictionary of group by values with their corresponding data based on other aggregates
     # example: {'avg(quant)' : {(Dan, Butter) : [numbers] }, 'max(quant)' : {(Dan , Butter) : [numbers] } }
+    
     # first scan populates gvs columns
     for row in cur:
         # only include unique rows based on group vars
@@ -353,8 +317,7 @@ def H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct):
                     agg_values[f['agg']][row_combo] = []
 
                 # filter based on such that conditions
-                if (len(such_that) != 0):
-                    conditions = process_conditions(mf_struct, group_by_vars)
+                if (such_that):
                     if eval_conditions(row, conditions, f) == False:
                         continue # if it does not meet such that conditions, skip that row for the aggregate
 
@@ -363,20 +326,21 @@ def H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct):
                     name = f['arg'].split('.')[1]
                     agg_values[f['agg']][row_combo].append(row[col_name.index(name)])
                 else: agg_values[f['agg']][row_combo].append(row[col_name.index(f['arg'])])   
+   
     # populate H table, grouping by group vars
     H = pd.DataFrame(unique, columns=mf_struct.v)
     for col in mf_struct.F:
         H[col] = None
-
+            
     # if there are aggregates calculate their functions
     if len(F_VECT) != 0:
         for f in F_VECT:
             for row_combo, values in agg_values[f['agg']].items():
-                # Chekc if there are values in the list, otherwise drop it 
                 if len(values) == 0:
                     row_index = H.loc[(H[mf_struct.v] == row_combo).all(axis=1)].index
-                    H.drop(row_index, inplace=True)  # Drop the row with empty values
+                    H.drop(row_index, inplace=True)  # Drop rows with no valid aggregates
                     continue
+            
                 if f['func'] == 'avg':
                     if len(values) != 0:
                         result = sum(values) / len(values)
@@ -404,29 +368,18 @@ def H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct):
 
                 # assign aggregate value to specific row
                 H.loc[row_index, f['agg']] = result
-    
-    # ensure aggregate columns are numeric
-    for col in mf_struct.F:
-        H[col] = pd.to_numeric(H[col], errors="coerce")
+                
+        # ensure aggregate columns are numeric
+        for col in mf_struct.F:
+            H[col] = pd.to_numeric(H[col], errors="coerce")
+        # Drop rows where aggregates are NaN
+        H.dropna(subset=mf_struct.F, inplace=True)
+
+        # Rename columns for compatibility
+        H.columns = [col.replace('(', '_').replace(')', '') for col in H.columns]
         
-    # print table before applying HAVING clause
-    print("Before HAVING filter:")
-    print(H)
-
-    # apply HAVING clause
-    if having:
-        having_conditions = preprocess_having_clause(having, H)
-        try:
-            H = H.query(having_conditions)  # apply HAVING clause as pandas query?
-        except Exception as e:
-            print(f"Error applying HAVING clause: {e}")
-
-    # print table after applying having clause
-    print("After HAVING filter:")
-    print(H)
-    
-    return H
-
+            
+        return H
 
 def main():
     """
@@ -436,7 +389,9 @@ def main():
     """
     # PUT ALGORITHM HERE:
     body = """
-    H = H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct)
+    H = H_table(where, such_that, having, F_VECT, mf_struct)
+    H = apply_having_filter(H, having)  # apply HAVING clause outside H_table
+    
     """
 
     # Note: The f allows formatting with variables.
@@ -462,8 +417,9 @@ def query():
             self.G = None # having clause
     mf_struct = mf_struct()    
     schemaData = schema_info()
-    select, From, where, group_by, such_that, having = read_file("MFQuery3.txt")
+    select, From, where, group_by, such_that, having = read_file("havingMF.txt")
     group_by_vars, V, F_VECT = process_info(select, group_by, such_that, having, mf_struct, schemaData)
+    conditions = process_conditions(mf_struct, group_by_vars)
 
     {body}
     
@@ -482,7 +438,8 @@ if "__main__" == __name__:
     # Execute the generated code
     subprocess.run(["python", "_generated.py"])
 
-    #H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct)
+    H_table(where, such_that, having, F_VECT, mf_struct)
+    
 
     
 if "__main__" == __name__:
