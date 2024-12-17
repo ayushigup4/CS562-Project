@@ -19,12 +19,11 @@ def query():
             self.G = None # having clause
     mf_struct = mf_struct()    
     schemaData = schema_info()
-    select, From, where, group_by, such_that, having = read_file("simpleQuery.txt")
+    select, From, where, group_by, such_that, having = read_file("MFQuery3.txt")
     group_by_vars, V, F_VECT = process_info(select, group_by, such_that, having, mf_struct, schemaData)
-    conditions = process_conditions(mf_struct, group_by_vars)
 
     
-    H = H_table(where, such_that, having, F_VECT, mf_struct)
+    H = H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct)
     
     
     return tabulate.tabulate(H,

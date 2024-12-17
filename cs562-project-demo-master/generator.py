@@ -5,7 +5,7 @@ import psycopg2.extras
 import tabulate
 from dotenv import load_dotenv
 import pandas as pd
-import time
+import datetime
 
     
 class mf_struct:
@@ -93,7 +93,7 @@ def process_info(select, group_by, such_that, having, mf_struct, schemaData):
     F_VECT = [] # list of aggregate functions
 
     # potential aggregates
-    aggregates = ["sum", "count", "avg", "min", "max", "variance", "median", "mode", "first_value", "last_value"]
+    aggregates = ["sum", "count", "avg", "min", "max"]
         
     # potential group by attributes
     groupAttrs = ["cust", "prod", "day", "month", "year", "state", "quant", "date"]
@@ -213,20 +213,27 @@ def eval_conditions(row, conditions, f):
     # get the value of the row to perform the condition
     row_value = row[row_index]
 
-    #if isinstance(row_value, str) and 
-    #print(f"{row_value} {conditions[gv][0]['op']} {conditions[gv][0]['cond']}")
-    if eval(f"{row_value} {conditions[gv][0]['op']} {conditions[gv][0]['cond']}"):
+    condition = conditions[gv][0]["cond"]
+
+    # make sure if value is a string, date or int to treat it as such
+    # if a string make sure it is being passed as a string literal
+    if isinstance(row_value, str) or isinstance(row_value, datetime.date):
+        row_value = f"'{row_value}'"
+    
+    if isinstance(condition, str) or isinstance(condition, datetime.date):
+        condition = f"'{condition}'"
+
+    #print(f"{row_value} {conditions[gv][0]['op']} {condition}")
+    if eval(f"{row_value} {conditions[gv][0]['op']} {condition}"):
         return True
     else: return False
 
 
 schemaData = schema_info()
 
-select, From, where, group_by, such_that, having = read_file("simpleQuery.txt")
+select, From, where, group_by, such_that, having = read_file("MFQuery3.txt")
     
 group_by_vars, V, F_VECT = process_info(select, group_by, such_that, having, mf_struct, schemaData)
-
-conditions = process_conditions(mf_struct, group_by_vars)
 
 """
 print('\n Phi Operators of the Query')
@@ -237,7 +244,7 @@ print("F = ", mf_struct.F)
 print("sigma = ", mf_struct.sigma)
 print("G = ", mf_struct.G)
 """
-def H_table(where, such_that, having, F_VECT, mf_struct): 
+def H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct): 
     load_dotenv()
     user = os.getenv('USER')
     password = os.getenv('PASSWORD')
@@ -283,7 +290,8 @@ def H_table(where, such_that, having, F_VECT, mf_struct):
                     agg_values[f['agg']][row_combo] = []
 
                 # filter based on such that conditions
-                if (such_that):
+                if (len(such_that) != 0):
+                    conditions = process_conditions(mf_struct, group_by_vars)
                     if eval_conditions(row, conditions, f) == False:
                         continue # if it does not meet such that conditions, skip that row for the aggregate
 
@@ -296,11 +304,16 @@ def H_table(where, such_that, having, F_VECT, mf_struct):
     H = pd.DataFrame(unique, columns=mf_struct.v)
     for col in mf_struct.F:
         H[col] = None
-            
+
     # if there are aggregates calculate their functions
     if len(F_VECT) != 0:
         for f in F_VECT:
             for row_combo, values in agg_values[f['agg']].items():
+                # Chekc if there are values in the list, otherwise drop it 
+                if len(values) == 0:
+                    row_index = H.loc[(H[mf_struct.v] == row_combo).all(axis=1)].index
+                    H.drop(row_index, inplace=True)  # Drop the row with empty values
+                    continue
                 if f['func'] == 'avg':
                     if len(values) != 0:
                         result = sum(values) / len(values)
@@ -339,7 +352,7 @@ def main():
     """
     # PUT ALGORITHM HERE:
     body = """
-    H = H_table(where, such_that, having, F_VECT, mf_struct)
+    H = H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct)
     """
 
     # Note: The f allows formatting with variables.
@@ -365,9 +378,8 @@ def query():
             self.G = None # having clause
     mf_struct = mf_struct()    
     schemaData = schema_info()
-    select, From, where, group_by, such_that, having = read_file("simpleQuery.txt")
+    select, From, where, group_by, such_that, having = read_file("MFQuery3.txt")
     group_by_vars, V, F_VECT = process_info(select, group_by, such_that, having, mf_struct, schemaData)
-    conditions = process_conditions(mf_struct, group_by_vars)
 
     {body}
     
@@ -386,7 +398,7 @@ if "__main__" == __name__:
     # Execute the generated code
     subprocess.run(["python", "_generated.py"])
 
-    H_table(where, such_that, having, F_VECT, mf_struct)
+    #H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct)
 
     
 if "__main__" == __name__:
