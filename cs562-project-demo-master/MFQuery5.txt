@@ -1,0 +1,5 @@
+SELECT cust, sum(x.quant), sum(y.quant), sum(z.quant)
+FROM sales
+GROUP BY cust: x, y, z
+SUCH THAT x.state =NY and y.state = NJ and z.state = CT
+HAVING sum(x.quant) > 2 * sum(y.quant) or avg(x.quant) > avg(z.quant)

@@ -5,6 +5,7 @@ import psycopg2.extras
 import tabulate
 from dotenv import load_dotenv
 import pandas as pd
+from io import StringIO
 import datetime
 
     
@@ -82,6 +83,8 @@ def read_file(filename):
                 such_that = lines[4][10:].strip().lower()
             elif "having" in lines[4].lower():
                 having = lines[4][7:].strip().lower()
+        if len(lines) > 5:
+            having = lines[5][7:].strip().lower()
     return select, From, where, group_by, such_that, having
 
 def process_info(select, group_by, such_that, having, mf_struct, schemaData):
@@ -106,14 +109,25 @@ def process_info(select, group_by, such_that, having, mf_struct, schemaData):
     if len(such_that) == 0:
         group_by = group_by.split(",") # normal SQL query (no such that conditions, group by seperated by comma)
     else: 
-        group_by = group_by.strip().split(":") # ESQL query such that has such that conditions and group by seperated by :
-        group_by_vars = group_by[1].strip().split(", ") # get only group by vars like X, Y, Z
-        group_by = group_by[0].strip().split(", ") # get only the group bys
-        # add group by predicates to mf_struct.sigma
-        such_that = such_that.split(",")
-        for predicate in such_that:
-            predicate = predicate.replace('=', '==')
-            mf_struct.sigma.append(predicate.strip()) # append gv predicate to struct.sigma
+        # work for both if SUCH THAT clause is seperated by AND or commas
+        if 'and' in such_that:
+            group_by = group_by.strip().split(":") # ESQL query such that has such that conditions and group by seperated by :
+            group_by_vars = group_by[1].strip().split(", ") # get only group by vars like X, Y, Z
+            group_by = group_by[0].strip().split(", ") # get only the group bys
+            # add group by predicates to mf_struct.sigma
+            such_that = such_that.split("and")
+            for predicate in such_that:
+                predicate = predicate.replace('=', '==')
+                mf_struct.sigma.append(predicate.strip()) # append gv predicate to struct.sigma            
+        else:
+            group_by = group_by.strip().split(":") # ESQL query such that has such that conditions and group by seperated by :
+            group_by_vars = group_by[1].strip().split(", ") # get only group by vars like X, Y, Z
+            group_by = group_by[0].strip().split(", ") # get only the group bys
+            # add group by predicates to mf_struct.sigma
+            such_that = such_that.split(",")
+            for predicate in such_that:
+                predicate = predicate.replace('=', '==')
+                mf_struct.sigma.append(predicate.strip()) # append gv predicate to struct.sigma
 
     # replace mf_struct.G with having clause if it exists 
     if (having):
@@ -121,6 +135,7 @@ def process_info(select, group_by, such_that, having, mf_struct, schemaData):
 
     # split projected values        
     select = select.split(",")
+    aggregate = ""
 
     # from column name, data_type and max_char_length in schema
     for col_name, data_type, max_len in schemaData:
@@ -128,7 +143,6 @@ def process_info(select, group_by, such_that, having, mf_struct, schemaData):
         # iterate through each projected value
         for sel in select:
             sel = sel.strip()
-
             # Check if sel is possible aggregate function
             if '(' in sel and ')' in sel:                    
                 left = sel.index('(')
@@ -146,17 +160,19 @@ def process_info(select, group_by, such_that, having, mf_struct, schemaData):
                     })
                     continue
         # iterate through each group by
-        for group in group_by:
-            group = group.strip()
-            if group in col_name.lower() and group in groupAttrs:
-                mf_struct.v.append(group) # append gb attribute to struct.v            
-                V.append({
-                    "attrib": group,
-                    "type": data_type,
-                    "size": max_len,
-                })
+        if (group_by):
+            for group in group_by:
+                group = group.strip()
+                if group in col_name.lower() and group in groupAttrs:
+                    mf_struct.v.append(group) # append gb attribute to struct.v            
+                    V.append({
+                        "attrib": group,
+                        "type": data_type,
+                        "size": max_len,
+                    })
     # add number of gvs to mf_struct.n
-    mf_struct.n = len(F_VECT)
+    if (F_VECT):
+        mf_struct.n = len(F_VECT)
     """    
     print("struct {")
     # Print out the grouping attributes (V)
@@ -229,11 +245,22 @@ def eval_conditions(row, conditions, f):
     else: return False
 
 
-schemaData = schema_info()
+def preprocess_having_clause(having, H):
+    """
+    Translates HAVING clause into a pandas-compatible query string.
+    """
+    having = having.replace("=", "==").replace("<>", "!=")
+    for col in H.columns:
+        if col in having:
+            having = having.replace(col, f"`{col}`")  
+    return having
 
-select, From, where, group_by, such_that, having = read_file("MFQuery3.txt")
+
+#schemaData = schema_info()
+
+#select, From, where, group_by, such_that, having = read_file("MFQuery4.txt")
     
-group_by_vars, V, F_VECT = process_info(select, group_by, such_that, having, mf_struct, schemaData)
+#group_by_vars, V, F_VECT = process_info(select, group_by, such_that, having, mf_struct, schemaData)
 
 """
 print('\n Phi Operators of the Query')
@@ -254,6 +281,23 @@ def H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct):
                                     cursor_factory=psycopg2.extras.DictCursor)
     cur = conn.cursor()
 
+    QUERY = ""
+    # if a simple SQL query (no group by) perform normal execution
+    if len(mf_struct.v) == 0:
+        QUERY = f"SELECT {mf_struct.s} FROM sales"
+        if len(where) != 0:
+            QUERY += f" WHERE {where}"
+        if len(having) != 0:
+            QUERY += f" HAVING {having}"
+        cur.execute(QUERY)
+        if mf_struct.s == "*": # account for * 
+            column_names = ["cust", "prod", "day", "month", "year", "state", "quant", "date"]
+        else: column_names = mf_struct.s.split(",")
+        H = pd.DataFrame(cur, columns=column_names)
+        return H
+
+
+    # if has a group by query or MF query
     QUERY = f"SELECT * FROM sales"
     if len(where) != 0:
         QUERY += f" WHERE {where}"
@@ -341,6 +385,13 @@ def H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct):
 
                 # assign aggregate value to specific row
                 H.loc[row_index, f['agg']] = result
+    if having:
+        having_conditions = preprocess_having_clause(having, H)
+        try:
+            H = H.query(having_conditions)  # apply HAVING clause as pandas query?
+        except Exception as e:
+            print(f"Error applying HAVING clause: {e}")
+
     return H
 
 
@@ -378,7 +429,7 @@ def query():
             self.G = None # having clause
     mf_struct = mf_struct()    
     schemaData = schema_info()
-    select, From, where, group_by, such_that, having = read_file("MFQuery3.txt")
+    select, From, where, group_by, such_that, having = read_file("MFQuery5.txt")
     group_by_vars, V, F_VECT = process_info(select, group_by, such_that, having, mf_struct, schemaData)
 
     {body}
