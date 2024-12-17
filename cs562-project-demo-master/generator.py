@@ -197,6 +197,37 @@ def process_conditions(mf_struct, group_by_vars):
                 })
     return conditions
 
+def preprocess_having_clause(having, H):
+    """
+    Translates HAVING clause into a pandas-compatible query string.
+    """
+    having = having.replace("=", "==").replace("<>", "!=")
+    for col in H.columns:
+        if col in having:
+            having = having.replace(col, f"`{col}`")  
+    return having
+
+
+def process_having(having):
+    """
+    Process the HAVING clause to extract conditions and operators.
+    """
+    conditions = []
+    operators = ['>=', '<=', '>', '<', '==', '!=']
+    
+    if having:
+        for op in operators:
+            if op in having:
+                left, right = having.split(op)
+                conditions.append({
+                    'agg': left.strip(),  # e.g., 'avg(quant)'
+                    'op': op,
+                    'value': float(right.strip())  # ensures comparison is numeric
+                })
+                break
+    return conditions
+
+
 def eval_conditions(row, conditions, f):
     """
     evaluates each such that condition to filter out rows depending on the condition
@@ -244,6 +275,38 @@ print("F = ", mf_struct.F)
 print("sigma = ", mf_struct.sigma)
 print("G = ", mf_struct.G)
 """
+
+
+def apply_having_filter(H, having_conditions):
+    """
+    Filter rows in the H-table based on HAVING conditions using pandas logical operations.
+    """
+    filtered_rows = H.copy()
+    for condition in having_conditions:
+        column = condition['agg']  # aggregate column name like 'avg(quant)'
+        operator = condition['op']
+        value = condition['value']
+        
+        # apply the condition using pandas query string or logical comparison
+        if operator == '==':
+            filtered_rows = filtered_rows[filtered_rows[column] == value]
+        elif operator == '!=':
+            filtered_rows = filtered_rows[filtered_rows[column] != value]
+        elif operator == '>':
+            filtered_rows = filtered_rows[filtered_rows[column] > value]
+        elif operator == '>=':
+            filtered_rows = filtered_rows[filtered_rows[column] >= value]
+        elif operator == '<':
+            filtered_rows = filtered_rows[filtered_rows[column] < value]
+        elif operator == '<=':
+            filtered_rows = filtered_rows[filtered_rows[column] <= value]
+        else:
+            print(f"Unknown operator {operator} in HAVING clause.")
+    
+    return filtered_rows
+
+
+
 def H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct): 
     load_dotenv()
     user = os.getenv('USER')
@@ -341,6 +404,27 @@ def H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct):
 
                 # assign aggregate value to specific row
                 H.loc[row_index, f['agg']] = result
+    
+    # ensure aggregate columns are numeric
+    for col in mf_struct.F:
+        H[col] = pd.to_numeric(H[col], errors="coerce")
+        
+    # print table before applying HAVING clause
+    print("Before HAVING filter:")
+    print(H)
+
+    # apply HAVING clause
+    if having:
+        having_conditions = preprocess_having_clause(having, H)
+        try:
+            H = H.query(having_conditions)  # apply HAVING clause as pandas query?
+        except Exception as e:
+            print(f"Error applying HAVING clause: {e}")
+
+    # print table after applying having clause
+    print("After HAVING filter:")
+    print(H)
+    
     return H
 
 
