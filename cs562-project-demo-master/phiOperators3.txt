@@ -1,4 +1,4 @@
-s = cust, state, year, count(X.quant), count(Y.quant)
+s = cust, state, year, X_count_quant, Y_count_quant 
 n = 2
 v = cust, state, year 
 F = [avg(A.quant), max(B.quant), max(B.quant), min(C.quant), count(D.quant)]
