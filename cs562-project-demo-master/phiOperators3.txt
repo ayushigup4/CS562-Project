@@ -1,6 +1,6 @@
 s = cust, state, year, X_count_quant, Y_count_quant 
 n = 2
 v = cust, state, year 
-F = [avg(A.quant), max(B.quant), max(B.quant), min(C.quant), count(D.quant)]
+F = [X_count_quant, Y_count_quant ]
 sigma = [X.year=2020, Y.date=2020-12-25]
 G = null
