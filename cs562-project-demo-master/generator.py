@@ -5,10 +5,13 @@ import psycopg2.extras
 import tabulate
 from dotenv import load_dotenv
 import pandas as pd
-from io import StringIO
 import datetime
 
-    
+"""
+Lilli Nappi 20006502
+Ayushi Gupta 20006238
+Justine Wang 10466043
+"""
 class mf_struct:
     def __init__(self):
         self.s = [] # projected values
@@ -23,6 +26,7 @@ mf_struct = mf_struct()
 def schema_info():
     """
     This retrieves schema infomation from the database using 'information_schema.columns'
+    Used to gather data_types and col_names
     """
     # hard coded query to send to database
     query = F"""
@@ -87,10 +91,23 @@ def read_file(filename):
             having = lines[5][7:].strip().lower()
     return select, From, where, group_by, such_that, having
 
+def user_input():
+    s = input("Enter the projected values: ").strip().lower()
+    n = int(input("Enter the number of grouping variables: "))
+    v = input("Enter the list of group by attributes seperated by a comma: ").strip().lower().split(",")
+    F = input("Enter the list of aggregate functions seperated by a comma: ").strip().lower().split(",")
+    sigma = input("Enter the list of grouping variable predicates seperated by a comma: ").strip().lower()
+    G = input("Enter the predicates for the having clause: ").strip().lower()
+    return s, n, v, F, sigma, G
+
+def file_input():
+    file_name = input("Enter the filename to read: ").strip()
+    return file_name
+
 def process_info(select, group_by, such_that, having, mf_struct, schemaData):
     """
     This function processes an MF query and extracts its information,
-    populating mf_struct with 6 operands of Phi
+    populating mf_struct with 6 operands of Phi and created F_VECT keeping track of aggregates
     """
     V = [] # list of grouping attributes
     F_VECT = [] # list of aggregate functions
@@ -185,13 +202,89 @@ def process_info(select, group_by, such_that, having, mf_struct, schemaData):
     """
     return group_by_vars, V, F_VECT
 
+
+def process_user_input(s, n, v, F, sigma, G, mf_struct, schemaData):
+    """
+    Pocesses user input to populate mf_struct and F_VECT
+    """
+    V = [] # list of grouping attributes
+    F_VECT = [] # list of aggregate functions
+
+    # potential aggregates
+    aggregates = ["sum", "count", "avg", "min", "max"]
+
+    # get just the group by vars such as X, Y, Z from select clause
+    group_by_vars = []
+    temp = s.split(",")
+    for sel in temp:
+        if "_" in sel:
+            extract = sel.split("_")
+            var = extract[0].strip()
+            group_by_vars.append(var)
+
+
+    # work for both if SUCH THAT clause is seperated by AND or commas
+    if 'and' in sigma:
+        mf_struct.v = v # get only the group bys
+        # add group by predicates to mf_struct.sigma
+        sigma = sigma.split("and")
+        for predicate in sigma:
+            predicate = predicate.replace('=', '==')
+            mf_struct.sigma.append(predicate.strip()) # append gv predicate to struct.sigma            
+    else:
+        mf_struct.v = v # get only the group bys
+        # add group by predicates to mf_struct.sigma
+        sigma = sigma.split(",")
+        for predicate in sigma:
+            predicate = predicate.replace('=', '==')
+            mf_struct.sigma.append(predicate.strip()) # append gv predicate to struct.sigma
+
+
+    # add projected vals to struct.s
+    mf_struct.s = s 
+
+    # replace mf_struct.G with having clause if it exists 
+    if (G):
+        mf_struct.G = G 
+
+    # split projected values        
+    s = s.split(",")
+    aggregate = ""
+
+    # from column name, data_type and max_char_length in schema
+    for col_name, data_type, max_len in schemaData:
+        if max_len == None: max_len = 0
+        # iterate through each projected value
+        for sel in s:
+            sel = sel.strip()
+            # Check if sel is possible aggregate function
+            if '_' in sel:  
+                extract = sel.split("_")
+                var = extract[0].strip()
+                aggregate = extract[1].strip() # aggregate function name
+                arg = extract[2].strip() # argument name
+                if col_name.lower() in arg and aggregate.lower() in aggregates:
+                    sel = f"{aggregate}({var}.{arg})" # change to this format for other functions
+                    mf_struct.F.append(sel) # append aggregates to struct.F
+                    F_VECT.append({
+                        "agg": sel,
+                        "type": data_type,
+                        "arg": arg,
+                        "func": aggregate
+                    })
+                    continue
+
+    
+    mf_struct.n = n
+    return group_by_vars, V, F_VECT
+
 def process_conditions(mf_struct, group_by_vars):
     """
     Processes the such that conditions in mf_struct, seperating them
     by group var, column name, and its condition
     """
     # Loop through each predicate in sigma (such_that conditions)
-    operators = ['==', '!=', '>', '<']
+    operators = ['==', '<>', '>', '<', 'and', 'or', '>=', '<=', '*', '+', '/', '%', '&', '|', '^']
     conditions = {gv: [] for gv in group_by_vars}
     for predicate in mf_struct.sigma:
         for op in operators:
@@ -255,12 +348,6 @@ def preprocess_having_clause(having, H):
             having = having.replace(col, f"`{col}`")  
     return having
 
-
-#schemaData = schema_info()
-
-#select, From, where, group_by, such_that, having = read_file("MFQuery4.txt")
-    
-#group_by_vars, V, F_VECT = process_info(select, group_by, such_that, having, mf_struct, schemaData)
 
 """
 print('\n Phi Operators of the Query')
@@ -419,6 +506,12 @@ from generator import *
 # DO NOT EDIT THIS FILE, IT IS GENERATED BY generator.py
 
 def query():
+
+    print("0: Enter Phi Operators")
+    print("1: Enter Filename")
+    choice = input("Enter which way you would like to input the query: ")
+    
+    
     class mf_struct:
         def __init__(self):
             self.s = [] # projected values
@@ -427,10 +520,32 @@ def query():
             self.F = [] # list of aggregates
             self.sigma = [] # grouping variables predicates 
             self.G = None # having clause
-    mf_struct = mf_struct()    
-    schemaData = schema_info()
-    select, From, where, group_by, such_that, having = read_file("MFQuery5.txt")
-    group_by_vars, V, F_VECT = process_info(select, group_by, such_that, having, mf_struct, schemaData)
+    
+    select = ""
+    From = ""
+    where = ""
+    group_by = ""
+    such_that = ""
+    having = ""
+    group_by_vars = []
+    V = []
+    F_VECT = []
+
+    mf_struct = mf_struct() 
+    schemaData = schema_info()   
+
+    if choice == "0":
+        s, n, v, F, sigma, G = user_input()
+        group_by_vars, V, F_VECT = process_user_input(s, n, v, F, sigma, G, mf_struct, schemaData)
+
+    elif choice == "1":
+        file_name = file_input()
+        select, From, where, group_by, such_that, having = read_file(file_name)
+        group_by_vars, V, F_VECT = process_info(select, group_by, such_that, having, mf_struct, schemaData)
+    
+    else:
+        return "Try Again"
+
 
     {body}
     
@@ -449,8 +564,6 @@ if "__main__" == __name__:
     # Execute the generated code
     subprocess.run(["python", "_generated.py"])
 
-    #H_table(where, such_that, having, group_by_vars, F_VECT, mf_struct)
 
-    
 if "__main__" == __name__:
     main()
